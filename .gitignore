@@ -1,6 +1,6 @@
 # project
 build/
-
+.pico-deps/
 
 # Prerequisites
 *.d
