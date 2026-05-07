@@ -12,26 +12,29 @@
 #include "DFRobot_A02YYUW_Uart.h"
 
 
-
-// #include "hardware/watchdog.h"
+#include "pico_captive_connect.h"
+#include "hardware/watchdog.h"
 // #include "hardware/adc.h"
 // #include "hardware/i2c.h"
 
+//pico_connect lib declarations
+static absolute_time_t next_pub = 0;
+#define MQTT_TOPIC "nutrino/sensor_out"
 
+
+// Sensor declarations
 const uint8_t ADC1_PH_PIN = 27;
 const uint8_t adc_ph_channel = 1;
+const uint8_t ADC2_EC_PIN = 28;
+const uint8_t adc_ec_channel = 2;
 const uint8_t ONEWIRE_PIN = 1;
 const uint8_t UART_TX_PIN = 4;
 const uint8_t UART_RX_PIN = 5;
 
 #define UART_ID uart1
-
-
-
-const uint8_t ADC2_EC_PIN = 28;
-const uint8_t adc_ec_channel = 2;
-
 #define CMD_BUFFER_SIZE 64
+
+
 
 bool read_serial_command(char* out_cmd) {
     static char buffer[CMD_BUFFER_SIZE];
@@ -113,6 +116,14 @@ auto ecMapping = [](float voltage) -> std::map<std::string,float> {
 
 int main(){
     stdio_init_all();
+    sleep_ms(3000);
+
+    if (watchdog_caused_reboot()) {
+        printf("[BOOT] System rebooted due to watchdog timeout!\n");
+    } else {
+        printf("[BOOT] Normal boot or manual reset.\n");
+    }
+
     adc_init();
     uart_init(UART_ID,9600);
     gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
@@ -148,14 +159,32 @@ int main(){
 
     uint64_t last_log = time_us_64();
 
+    net_init();
+    watchdog_enable(60000,1);
+
 
     // Main Loop
     while(true){
 
+        watchdog_update();
+        net_task();
+        if (net_is_connected() && !mqtt_is_connected()) {
+            mqtt_try_connect();
+        }
+
         char command[64];
         if (read_serial_command(command)) {
             printf("Command received: %s\n", command);
-            ph_cal.handleCommand(command);
+
+            if (strcmp(command, "calph") == 0){
+                ph_cal.handleCommand("calibration");
+            }else if (strcmp(command, "calec") == 0) {
+                ec_cal.handleCommand("calibration");
+
+            }else{
+                printf("Invalid command: %s\n", command);
+            }
+
         }
 
         if(ph_sensor.read()){
@@ -206,6 +235,19 @@ int main(){
                 printf("Calibrating EC");
             }
         
+        }
+
+
+        // Publish only if MQTT connected and it's time
+        if (!payload.empty() && mqtt_is_connected() && absolute_time_diff_us(get_absolute_time(), next_pub) < 0) {
+
+            if (publish_mqtt(MQTT_TOPIC, payload.c_str(), payload.length())) {
+                // printf("[APP] Published temp message: %.2f\n", temp);
+                next_pub = make_timeout_time_ms(1000); // normal period
+            } else {
+                printf("[APP] Publish failed, backing off\n");
+                next_pub = make_timeout_time_ms(5000); // backoff if error
+            }
         }
 
 
