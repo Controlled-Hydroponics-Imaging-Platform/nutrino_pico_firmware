@@ -14,13 +14,14 @@
 
 #include "pico_captive_connect.h"
 #include "hardware/watchdog.h"
-// #include "hardware/adc.h"
-// #include "hardware/i2c.h"
+
 
 //pico_connect lib declarations
 static absolute_time_t next_pub = 0;
-#define MQTT_TOPIC "nutrino/sensor_out"
-
+#define MQTT_SENSOROUT_PUB_TOPIC "nutrino/sensor_out"
+#define MQTT_STATUS_PUB_TOPIC "nutrino/status_out"
+#define MQTT_CMD_SUB_TOPIC "nutrino/cmd"
+static bool subscribed_to_topics = false;
 
 // Sensor declarations
 const uint8_t ADC1_PH_PIN = 27;
@@ -33,7 +34,6 @@ const uint8_t UART_RX_PIN = 5;
 
 #define UART_ID uart1
 #define CMD_BUFFER_SIZE 64
-
 
 
 bool read_serial_command(char* out_cmd) {
@@ -114,6 +114,25 @@ auto ecMapping = [](float voltage) -> std::map<std::string,float> {
 };
 
 
+void on_mqtt_cmd_message(const char* topic, const char* payload, size_t len) {
+    printf("[MQTT RX] topic=%s payload=%.*s\n",
+           topic,
+           (int)len,
+           payload);
+
+    if (strcmp(topic, "nutrino/cmd") == 0) {
+        if (strncmp(payload, "calph", len) == 0) {
+            ph_cal.handleCommand("calibration");
+            // printf("starting ph_cal");
+        } else if (strncmp(payload, "calec", len) == 0) {
+            ec_cal.handleCommand("calibration");
+            // printf("starting ec_cal");
+        }else{
+            printf("Invalid command: %s\n", payload);
+        }
+    }
+}
+
 int main(){
     stdio_init_all();
     sleep_ms(3000);
@@ -172,6 +191,14 @@ int main(){
             mqtt_try_connect();
         }
 
+        if (mqtt_is_connected() && !subscribed_to_topics) {
+            subscribed_to_topics = subscribe_mqtt(MQTT_CMD_SUB_TOPIC, on_mqtt_cmd_message);
+        }
+
+        if (!mqtt_is_connected()) {
+            subscribed_to_topics = false;
+        }
+
         char command[64];
         if (read_serial_command(command)) {
             printf("Command received: %s\n", command);
@@ -221,27 +248,57 @@ int main(){
             }
         }
 
+        ///System logging
         if((time_us_64() - last_log) > 1 * 1000000){
             last_log = time_us_64();
 
             payload = make_json_payload(allData);
-            printf("%s\n", payload.c_str());
 
             if (ph_cal.isCalibrating()) {
+
+                if (!payload.empty() && mqtt_is_connected() && subscribed_to_topics){
+
+                    char msg[128];
+                    snprintf(msg, sizeof(msg),"Calibrating PH, PH:%.2f, voltage_mv: %.2f, neutral_voltage: %.2f, acid_voltage: %.2f", allData["ph"],allData["ph_voltage_mv"], ph_converter.neutralVoltage(), ph_converter.neutralVoltage());
+
+                    if (publish_mqtt(MQTT_STATUS_PUB_TOPIC, msg, strlen(msg))) {
+                        printf("[APP]Calibration Status sent to %s\n", MQTT_STATUS_PUB_TOPIC);
+
+                    } else {
+                        printf("[APP] Publish status failed, backing off\n");
+                    }
+                }
                 printf("Calibrating PH");
+
             }
 
             if (ec_cal.isCalibrating()) {
+
+                if (!payload.empty() && mqtt_is_connected() && subscribed_to_topics){
+
+                    char msg[128];
+                    snprintf(msg, sizeof(msg),"Calibrating EC, EC:%.2f, voltage_mv: %.2f, k_low: %.2f, k_high: %.2f", allData["ec_ms/cm"],allData["ec_voltage_mv"], ec_converter.kLow() , ec_converter.kHigh());
+
+                    if (publish_mqtt(MQTT_STATUS_PUB_TOPIC, msg, strlen(msg))) {
+                        printf("[APP]Calibration Status sent to %s\n", MQTT_STATUS_PUB_TOPIC);
+
+                    } else {
+                        printf("[APP] Publish status failed, backing off\n");
+                    }
+                }
                 printf("Calibrating EC");
+
             }
-        
+
+            printf("%s\n", payload.c_str());
+
         }
 
-
+        ///MQTT Sensor output logging
         // Publish only if MQTT connected and it's time
         if (!payload.empty() && mqtt_is_connected() && absolute_time_diff_us(get_absolute_time(), next_pub) < 0) {
 
-            if (publish_mqtt(MQTT_TOPIC, payload.c_str(), payload.length())) {
+            if (publish_mqtt(MQTT_SENSOROUT_PUB_TOPIC, payload.c_str(), payload.length())) {
                 // printf("[APP] Published temp message: %.2f\n", temp);
                 next_pub = make_timeout_time_ms(1000); // normal period
             } else {
