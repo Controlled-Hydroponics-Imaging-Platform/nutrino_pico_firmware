@@ -21,3 +21,11 @@ make
 ## Hardwaire and circuit information
 
 Please see the assets folder for all documentation on circuit hardware
+
+## MQTT topics
+
+```c
+#define MQTT_SENSOROUT_PUB_TOPIC "nutrino/sensor_out" //Sensor output
+#define MQTT_STATUS_PUB_TOPIC "nutrino/status_out" //sensor status output (mainly for calibration status)
+#define MQTT_CMD_SUB_TOPIC "nutrino/cmd" //Sensor command listener "calph" for calibrate ph sensor, "calec" for calibrate ec sensor
+```
