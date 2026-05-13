@@ -87,7 +87,7 @@ std::string make_json_payload(const std::map<std::string,float>& data){
 }
 
 DFR_PH_Analog ph_converter;
-DFR_CalibrationManager ph_cal(ph_converter);
+DFR_CalibrationManager ph_cal(ph_converter,100.0f);
 
 
 auto phMapping = [](float voltage) -> std::map<std::string,float> {
@@ -101,7 +101,7 @@ auto phMapping = [](float voltage) -> std::map<std::string,float> {
 
 
 DFR_EC_Analog ec_converter;
-DFR_CalibrationManager ec_cal(ec_converter);
+DFR_CalibrationManager ec_cal(ec_converter,100.0f);
 
 
 auto ecMapping = [](float voltage) -> std::map<std::string,float> {
@@ -259,7 +259,7 @@ int main(){
                 if (!payload.empty() && mqtt_is_connected() && subscribed_to_topics){
 
                     char msg[128];
-                    snprintf(msg, sizeof(msg),"Calibrating PH, PH:%.2f, voltage_mv: %.2f, neutral_voltage: %.2f, acid_voltage: %.2f", allData["ph"],allData["ph_voltage_mv"], ph_converter.neutralVoltage(), ph_converter.neutralVoltage());
+                    snprintf(msg, sizeof(msg),"Calibrating PH, PH:%.2f, voltage_mv: %.2f, neutral_voltage: %.2f, acid_voltage: %.2f", allData["ph"],allData["ph_voltage_mv"], ph_converter.neutralVoltage(), ph_converter.acidVoltage());
 
                     if (publish_mqtt(MQTT_STATUS_PUB_TOPIC, msg, strlen(msg))) {
                         printf("[APP]Calibration Status sent to %s\n", MQTT_STATUS_PUB_TOPIC);
